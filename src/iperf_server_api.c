@@ -156,10 +156,11 @@ int
 iperf_handle_message_server(struct iperf_test *test)
 {
     int rval;
+    signed char client_state;
     struct iperf_stream *sp;
 
     // XXX: Need to rethink how this behaves to fit API
-    if ((rval = Nread(test->ctrl_sck, (char*) &test->state, sizeof(signed char), Ptcp)) <= 0) {
+    if ((rval = Nread(test->ctrl_sck, (char*) &client_state, sizeof(signed char), Ptcp)) <= 0) {
         if (rval == 0) {
 	    iperf_err(test, "the client has unexpectedly closed the connection");
             i_errno = IECTRLCLOSE;
@@ -171,10 +172,31 @@ iperf_handle_message_server(struct iperf_test *test)
         }
     }
 
-    switch(test->state) {
+    switch(client_state) {
         case TEST_START:
+            test->state = client_state;
             break;
         case TEST_END:
+            SLIST_FOREACH(sp, &test->streams, streams) {
+                if (test->mode == RECEIVER || test->mode == BIDIRECTIONAL) {
+                        fd_set read_set;
+                        int result;
+                        for (iperf_size_t s = test->bytes_received;
+                                ;
+                                s = test->bytes_received){
+                                memcpy(&read_set, &test->read_set, sizeof(fd_set));
+                                result = select(test->max_fd + 1, &read_set, NULL, NULL, NULL);
+                                if(result < 0)
+                                        break;
+                                result = iperf_recv(test, &read_set);
+                                if(result != 0)
+                                        break;
+                                if(s == test->bytes_received)
+                                        break;
+                        }
+                }
+            }
+            test->state = client_state;
 	    test->done = 1;
             cpu_util(test->cpu_util);
             test->stats_callback(test);
@@ -194,8 +216,10 @@ iperf_handle_message_server(struct iperf_test *test)
                 test->on_test_finish(test);
             break;
         case IPERF_DONE:
+            test->state = client_state;
             break;
         case CLIENT_TERMINATE:
+            test->state = client_state;
             i_errno = IECLIENTTERM;
 
 	    // Temporarily be in DISPLAY_RESULTS phase so we can get
@@ -216,6 +240,7 @@ iperf_handle_message_server(struct iperf_test *test)
             test->state = IPERF_DONE;
             break;
         default:
+            test->state = client_state;
             i_errno = IEMESSAGE;
             return -1;
     }

@@ -565,6 +565,13 @@ iperf_run_client(struct iperf_test * test)
 		test->done = 1;
 		cpu_util(test->cpu_util);
 		test->stats_callback(test);
+
+                { // Send FIN to receiver, indicating that no more data will be sent
+                        register struct iperf_stream *sp;
+                        SLIST_FOREACH(sp, &test->streams, streams) {
+                                shutdown(sp->socket, SHUT_WR);
+                        }
+                }
 		if (iperf_set_send_state(test, TEST_END) != 0)
                     goto cleanup_and_fail;
 	    }
